@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useApiCache } from "../hooks/useApiCache";
+import { api } from "../services/api";
 
 const DataTable = ({
   title,
@@ -12,12 +14,14 @@ const DataTable = ({
 }) => {
   const [data, setData] = useState([]);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [editingItem, setEditingItem] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newItem, setNewItem] = useState(
     fields.reduce((acc, field) => ({ ...acc, [field.name]: "" }), {})
   );
   const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -109,39 +113,60 @@ const DataTable = ({
   const handleAdd = async (e) => {
     e.preventDefault();
     setError("");
+    setSuccessMessage("");
+    setIsSubmitting(true);
+
     try {
-      const success = await onAdd(newItem);
-      if (success) {
+      const result = await onAdd(newItem);
+      if (result && result.success !== false) {
         setNewItem(
           fields.reduce((acc, field) => ({ ...acc, [field.name]: "" }), {})
         );
         setShowAddForm(false);
+        setSuccessMessage("Data berhasil ditambahkan!");
         await fetchData();
+
+        // Clear success message after 3 seconds
+        setTimeout(() => setSuccessMessage(""), 3000);
       }
     } catch (err) {
       console.error("Error adding data:", err);
       setError(err.message || "Terjadi kesalahan saat menambahkan data");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleUpdate = async (e) => {
     e.preventDefault();
+    setError("");
+    setSuccessMessage("");
+    setIsSubmitting(true);
+
     try {
       const itemId = editingItem?.id || editingItem?.ID;
       if (!editingItem || !itemId) {
+        console.error("❌ Update failed: ID tidak ditemukan", editingItem);
         throw new Error("ID tidak ditemukan");
       }
-      console.log("Data yang akan diupdate:", editingItem);
-      console.log("ID yang digunakan:", itemId);
-      const success = await onEdit(itemId, editingItem);
-      if (success) {
+
+      const result = await onEdit(itemId, editingItem);
+
+      if (result && result.success !== false) {
         setEditingItem(null);
         setShowAddForm(false);
+        setSuccessMessage("Data berhasil diperbarui!");
         await fetchData();
+
+        // Clear success message after 3 seconds
+        setTimeout(() => setSuccessMessage(""), 3000);
+      } else {
+        throw new Error(result?.message || "Update gagal");
       }
     } catch (err) {
-      console.error("Error updating data:", err);
       setError(err.message || "Terjadi kesalahan saat memperbarui data");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -151,22 +176,42 @@ const DataTable = ({
       setError("ID tidak ditemukan");
       return;
     }
-    if (!window.confirm("Apakah Anda yakin ingin menghapus data ini?")) return;
+
+    // Show ID and ask for confirmation
+    const itemName = item?.name || item?.title || "Item";
+    const confirmMessage = `Akan menghapus data dengan:\n\nID: ${itemId}\nNama: ${itemName}\n\nApakah Anda yakin ingin menghapus data ini?\nTindakan ini tidak dapat dibatalkan.`;
+
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    setError("");
+    setSuccessMessage("");
+    setIsSubmitting(true);
+
     try {
-      console.log("ID yang akan dihapus:", itemId);
-      console.log("Item yang akan dihapus:", item);
-      const success = await onDelete(itemId);
-      if (success) {
+      const result = await onDelete(itemId);
+      if (result && result.success !== false) {
+        setSuccessMessage("Data berhasil dihapus!");
         await fetchData();
+
+        // Clear success message after 3 seconds
+        setTimeout(() => setSuccessMessage(""), 3000);
       }
     } catch (err) {
       console.error("Error deleting data:", err);
       setError(err.message || "Terjadi kesalahan saat menghapus data");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const renderForm = () => {
-    if (!showAddForm && !editingItem) return null;
+    if (!showAddForm && !editingItem) {
+      return null;
+    }
+
+
 
     return (
       <div className="mb-8 p-6 bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-100 animate-slide-up">
@@ -183,6 +228,11 @@ const DataTable = ({
           <h2 className="text-2xl font-bold text-gray-800">
             {editingItem ? "Edit Data" : "Tambah Data Baru"}
           </h2>
+          {editingItem && (
+            <div className="text-sm text-gray-600 bg-blue-50 px-3 py-1 rounded-lg">
+              ID: {editingItem.id || editingItem.ID}
+            </div>
+          )}
         </div>
 
         <form onSubmit={editingItem ? handleUpdate : handleAdd} className="space-y-6">
@@ -196,7 +246,7 @@ const DataTable = ({
                   <textarea
                     name={field.name}
                     value={
-                      editingItem ? editingItem[field.name] : newItem[field.name]
+                      editingItem ? (editingItem[field.name] || "") : (newItem[field.name] || "")
                     }
                     onChange={(e) =>
                       editingItem
@@ -215,7 +265,7 @@ const DataTable = ({
                     type={field.type || "text"}
                     name={field.name}
                     value={
-                      editingItem ? editingItem[field.name] : newItem[field.name]
+                      editingItem ? (editingItem[field.name] || "") : (newItem[field.name] || "")
                     }
                     onChange={(e) =>
                       editingItem
@@ -256,16 +306,26 @@ const DataTable = ({
             </button>
             <button
               type="submit"
-              className="btn-primary flex items-center justify-center space-x-2"
+              disabled={isSubmitting}
+              className={`btn-primary flex items-center justify-center space-x-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {editingItem ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                )}
-              </svg>
-              <span>{editingItem ? "Update Data" : "Simpan Data"}</span>
+              {isSubmitting ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <span>Memproses...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {editingItem ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    )}
+                  </svg>
+                  <span>{editingItem ? "Update Data" : "Simpan Data"}</span>
+                </>
+              )}
             </button>
           </div>
         </form>
@@ -303,6 +363,16 @@ const DataTable = ({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <span>{error}</span>
+            </div>
+          )}
+
+          {/* Success Message */}
+          {successMessage && (
+            <div className="mb-6 bg-green-50 border border-green-200 text-green-700 p-4 rounded-xl flex items-center space-x-2 animate-fade-in">
+              <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>{successMessage}</span>
             </div>
           )}
 
@@ -398,8 +468,10 @@ const DataTable = ({
                         onClick={(e) => {
                           e.stopPropagation();
                           setEditingItem(item);
+                          setShowAddForm(false); // Ensure add form is closed
                         }}
-                        className="flex items-center space-x-1 px-4 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all duration-200 font-medium"
+                        className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition-all duration-200 font-medium shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                        title={`Edit data dengan ID: ${item.id || item.ID}`}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -411,12 +483,23 @@ const DataTable = ({
                           e.stopPropagation();
                           handleDelete(item);
                         }}
-                        className="flex items-center space-x-1 px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-all duration-200 font-medium"
+                        disabled={isSubmitting}
+                        className={`flex items-center space-x-2 px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600 transition-all duration-200 font-medium shadow-md hover:shadow-lg transform hover:-translate-y-0.5 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title={`Hapus data dengan ID: ${item.id || item.ID}`}
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                        <span>Hapus</span>
+                        {isSubmitting ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span>Menghapus...</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span>Hapus</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>

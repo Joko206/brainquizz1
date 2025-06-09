@@ -10,6 +10,53 @@ if (import.meta.env.DEV) {
   });
 }
 
+// Request cache to prevent duplicate requests
+const requestCache = new Map();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+// Rate limiting
+const requestQueue = [];
+const MAX_CONCURRENT_REQUESTS = 3;
+let activeRequests = 0;
+
+const processQueue = async () => {
+  if (activeRequests >= MAX_CONCURRENT_REQUESTS || requestQueue.length === 0) {
+    return;
+  }
+
+  const { resolve, reject, requestFn } = requestQueue.shift();
+  activeRequests++;
+
+  try {
+    const result = await requestFn();
+    resolve(result);
+  } catch (error) {
+    reject(error);
+  } finally {
+    activeRequests--;
+    // Process next request after a small delay
+    setTimeout(processQueue, 100);
+  }
+};
+
+const queueRequest = (requestFn) => {
+  return new Promise((resolve, reject) => {
+    requestQueue.push({ resolve, reject, requestFn });
+    processQueue();
+  });
+};
+
+// Helper function to clear cache for specific endpoints
+const clearCacheForEndpoint = (endpoint) => {
+  const keysToDelete = [];
+  for (const [key] of requestCache) {
+    if (key.includes(endpoint)) {
+      keysToDelete.push(key);
+    }
+  }
+  keysToDelete.forEach(key => requestCache.delete(key));
+};
+
 const getAuthHeader = () => {
   const token = localStorage.getItem("token");
   const headers = {
@@ -37,16 +84,47 @@ const handleResponse = async (response) => {
   return data;
 };
 
+// Enhanced fetch with caching and rate limiting
+const cachedFetch = async (url, options = {}) => {
+  const cacheKey = `${url}_${JSON.stringify(options)}`;
+  const now = Date.now();
+
+  // Check cache for GET requests
+  if (!options.method || options.method === 'GET') {
+    const cached = requestCache.get(cacheKey);
+    if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+      return cached.data;
+    }
+  }
+
+  // Use rate limiting for all requests
+  const requestFn = async () => {
+    const response = await fetch(url, options);
+    const data = await handleResponse(response);
+
+    // Cache successful GET responses
+    if ((!options.method || options.method === 'GET') && data.success) {
+      requestCache.set(cacheKey, {
+        data,
+        timestamp: now
+      });
+    }
+
+    return data;
+  };
+
+  return queueRequest(requestFn);
+};
+
 export const api = {
   // Kategori
   getKategori: async () => {
     try {
-      const response = await fetch(`${BASE_URL}/kategori/get-kategori`, {
+      return await cachedFetch(`${BASE_URL}/kategori/get-kategori`, {
         method: "GET",
         headers: getAuthHeader(),
         credentials: 'include',
       });
-      return handleResponse(response);
     } catch (error) {
       console.error("Error fetching kategori:", error);
       throw error;
@@ -89,7 +167,15 @@ export const api = {
           body: JSON.stringify(kategoriData),
         }
       );
-      return handleResponse(response);
+
+      const result = await handleResponse(response);
+
+      // Clear cache after successful update
+      if (result.success) {
+        clearCacheForEndpoint('/kategori/get-kategori');
+      }
+
+      return result;
     } catch (error) {
       console.error("Error updating kategori:", error);
       throw error;
@@ -106,7 +192,15 @@ export const api = {
           credentials: 'include',
         }
       );
-      return handleResponse(response);
+
+      const result = await handleResponse(response);
+
+      // Clear cache after successful delete
+      if (result.success) {
+        clearCacheForEndpoint('/kategori/get-kategori');
+      }
+
+      return result;
     } catch (error) {
       console.error("Error deleting kategori:", error);
       throw error;
@@ -116,12 +210,11 @@ export const api = {
   // Tingkatan
   getTingkatan: async () => {
     try {
-      const response = await fetch(`${BASE_URL}/tingkatan/get-tingkatan`, {
+      return await cachedFetch(`${BASE_URL}/tingkatan/get-tingkatan`, {
         method: "GET",
         headers: getAuthHeader(),
         credentials: 'include',
       });
-      return handleResponse(response);
     } catch (error) {
       console.error("Error fetching tingkatan:", error);
       throw error;
@@ -154,7 +247,15 @@ export const api = {
           body: JSON.stringify(data),
         }
       );
-      return handleResponse(response);
+
+      const result = await handleResponse(response);
+
+      // Clear cache after successful update
+      if (result.success) {
+        clearCacheForEndpoint('/tingkatan/get-tingkatan');
+      }
+
+      return result;
     } catch (error) {
       console.error("Error updating tingkatan:", error);
       throw error;
@@ -171,7 +272,15 @@ export const api = {
           credentials: 'include',
         }
       );
-      return handleResponse(response);
+
+      const result = await handleResponse(response);
+
+      // Clear cache after successful delete
+      if (result.success) {
+        clearCacheForEndpoint('/tingkatan/get-tingkatan');
+      }
+
+      return result;
     } catch (error) {
       console.error("Error deleting tingkatan:", error);
       throw error;
@@ -181,12 +290,11 @@ export const api = {
   // Pendidikan
   getPendidikan: async () => {
     try {
-      const response = await fetch(`${BASE_URL}/pendidikan/get-pendidikan`, {
+      return await cachedFetch(`${BASE_URL}/pendidikan/get-pendidikan`, {
         method: "GET",
         headers: getAuthHeader(),
         credentials: 'include',
       });
-      return handleResponse(response);
     } catch (error) {
       console.error("Error fetching pendidikan:", error);
       throw error;
@@ -219,7 +327,15 @@ export const api = {
           body: JSON.stringify(data),
         }
       );
-      return handleResponse(response);
+
+      const result = await handleResponse(response);
+
+      // Clear cache after successful update
+      if (result.success) {
+        clearCacheForEndpoint('/pendidikan/get-pendidikan');
+      }
+
+      return result;
     } catch (error) {
       console.error("Error updating pendidikan:", error);
       throw error;
@@ -236,7 +352,15 @@ export const api = {
           credentials: 'include',
         }
       );
-      return handleResponse(response);
+
+      const result = await handleResponse(response);
+
+      // Clear cache after successful delete
+      if (result.success) {
+        clearCacheForEndpoint('/pendidikan/get-pendidikan');
+      }
+
+      return result;
     } catch (error) {
       console.error("Error deleting pendidikan:", error);
       throw error;
@@ -246,12 +370,11 @@ export const api = {
   // Kelas
   getKelas: async () => {
     try {
-      const response = await fetch(`${BASE_URL}/kelas/get-kelas`, {
+      return await cachedFetch(`${BASE_URL}/kelas/get-kelas`, {
         method: "GET",
         headers: getAuthHeader(),
         credentials: 'include',
       });
-      return handleResponse(response);
     } catch (error) {
       console.error("Error fetching kelas:", error);
       throw error;
@@ -260,12 +383,11 @@ export const api = {
 
   getKelasById: async (id) => {
     try {
-      const response = await fetch(`${BASE_URL}/kelas/get-kelas/${id}`, {
+      return await cachedFetch(`${BASE_URL}/kelas/get-kelas/${id}`, {
         method: "GET",
         headers: getAuthHeader(),
         credentials: 'include',
       });
-      return handleResponse(response);
     } catch (error) {
       console.error("Error fetching kelas by id:", error);
       throw error;
@@ -295,7 +417,15 @@ export const api = {
         credentials: 'include',
         body: JSON.stringify(data),
       });
-      return handleResponse(response);
+
+      const result = await handleResponse(response);
+
+      // Clear cache after successful update
+      if (result.success) {
+        clearCacheForEndpoint('/kelas/get-kelas');
+      }
+
+      return result;
     } catch (error) {
       console.error("Error updating kelas:", error);
       throw error;
@@ -309,7 +439,15 @@ export const api = {
         headers: getAuthHeader(),
         credentials: 'include',
       });
-      return handleResponse(response);
+
+      const result = await handleResponse(response);
+
+      // Clear cache after successful delete
+      if (result.success) {
+        clearCacheForEndpoint('/kelas/get-kelas');
+      }
+
+      return result;
     } catch (error) {
       console.error("Error deleting kelas:", error);
       throw error;
@@ -375,12 +513,11 @@ export const api = {
   // Kuis
   getKuis: async () => {
     try {
-      const response = await fetch(`${BASE_URL}/kuis/get-kuis`, {
+      return await cachedFetch(`${BASE_URL}/kuis/get-kuis`, {
         method: "GET",
         headers: getAuthHeader(),
         credentials: 'include',
       });
-      return handleResponse(response);
     } catch (error) {
       console.error("Error fetching kuis:", error);
       throw error;
@@ -469,12 +606,11 @@ export const api = {
   // Soal
   getSoal: async () => {
     try {
-      const response = await fetch(`${BASE_URL}/soal/get-soal`, {
+      return await cachedFetch(`${BASE_URL}/soal/get-soal`, {
         method: "GET",
         headers: getAuthHeader(),
         credentials: 'include',
       });
-      return handleResponse(response);
     } catch (error) {
       console.error("Error fetching soal:", error);
       throw error;
@@ -483,12 +619,11 @@ export const api = {
 
   getSoalByKuisID: async (kuisId) => {
     try {
-      const response = await fetch(`${BASE_URL}/soal/get-soal/${kuisId}`, {
+      return await cachedFetch(`${BASE_URL}/soal/get-soal/${kuisId}`, {
         method: "GET",
         headers: getAuthHeader(),
         credentials: 'include',
       });
-      return handleResponse(response);
     } catch (error) {
       console.error("Error fetching soal by kuis ID:", error);
       throw error;

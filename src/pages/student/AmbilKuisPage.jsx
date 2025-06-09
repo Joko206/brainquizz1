@@ -1,23 +1,54 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import JoinClassModal from '../../components/JoinClassModal';
+import { useApiCache } from '../../hooks/useApiCache';
+import { api } from '../../services/api';
 
 // Use Railway deployment URL
 const BASE_URL = import.meta.env.VITE_API_URL || "https://brainquiz0.up.railway.app";
 
 const AmbilKuisPage = () => {
-  const [kuisList, setKuisList] = useState([]);
   const [filteredKuis, setFilteredKuis] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedKategori, setSelectedKategori] = useState('');
   const [selectedTingkatan, setSelectedTingkatan] = useState('');
   const [selectedPendidikan, setSelectedPendidikan] = useState('');
-  const [kategoris, setKategoris] = useState([]);
-  const [tingkatans, setTingkatans] = useState([]);
-  const [pendidikans, setPendidikans] = useState([]);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const navigate = useNavigate();
+
+  // Use cached API calls for better performance
+  const { data: kuisData, loading: kuisLoading, refetch: refetchKuis } = useApiCache(
+    api.getKuis,
+    [],
+    { cacheKey: 'ambil_kuis_list' }
+  );
+
+  const { data: kategoriData, loading: kategoriLoading } = useApiCache(
+    api.getKategori,
+    [],
+    { cacheKey: 'ambil_kuis_kategori' }
+  );
+
+  const { data: tingkatanData, loading: tingkatanLoading } = useApiCache(
+    api.getTingkatan,
+    [],
+    { cacheKey: 'ambil_kuis_tingkatan' }
+  );
+
+  const { data: pendidikanData, loading: pendidikanLoading } = useApiCache(
+    api.getPendidikan,
+    [],
+    { cacheKey: 'ambil_kuis_pendidikan' }
+  );
+
+  // Extract data from API responses
+  const kuisList = kuisData?.success ? kuisData.data : [];
+  const kategoris = kategoriData?.success ? kategoriData.data : [];
+  const tingkatans = tingkatanData?.success ? tingkatanData.data : [];
+  const pendidikans = pendidikanData?.success ? pendidikanData.data : [];
+
+  // Check if any data is still loading
+  const loading = kuisLoading || kategoriLoading || tingkatanLoading || pendidikanLoading;
 
   // Get user info
   const getUserInfo = () => {
@@ -53,106 +84,8 @@ const AmbilKuisPage = () => {
   const { userId, userName } = getUserInfo();
 
   useEffect(() => {
-    // Load data sequentially to avoid overwhelming database connections
-    const loadData = async () => {
-      await fetchKuis();
-      await fetchFilterOptions();
-    };
-    loadData();
-  }, []);
-
-  useEffect(() => {
     filterKuis();
   }, [kuisList, searchTerm, selectedKategori, selectedTingkatan, selectedPendidikan]);
-
-  const fetchKuis = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${BASE_URL}/kuis/get-kuis`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setKuisList(data.data || []);
-      } else {
-        console.error('Failed to fetch kuis');
-      }
-    } catch (error) {
-      console.error('Error fetching kuis:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchFilterOptions = async () => {
-    try {
-      const token = localStorage.getItem('token');
-
-      // Fetch kategoris first
-      try {
-        const kategoriResponse = await fetch(`${BASE_URL}/kategori/get-kategori`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
-        if (kategoriResponse.ok) {
-          const kategoriData = await kategoriResponse.json();
-          setKategoris(kategoriData.data || []);
-        }
-      } catch (error) {
-        console.error('Error fetching kategoris:', error);
-      }
-
-      // Small delay to avoid overwhelming database
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Fetch tingkatans second
-      try {
-        const tingkatanResponse = await fetch(`${BASE_URL}/tingkatan/get-tingkatan`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
-        if (tingkatanResponse.ok) {
-          const tingkatanData = await tingkatanResponse.json();
-          setTingkatans(tingkatanData.data || []);
-        }
-      } catch (error) {
-        console.error('Error fetching tingkatans:', error);
-      }
-
-      // Small delay to avoid overwhelming database
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Fetch pendidikans third
-      try {
-        const pendidikanResponse = await fetch(`${BASE_URL}/pendidikan/get-pendidikan`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
-        if (pendidikanResponse.ok) {
-          const pendidikanData = await pendidikanResponse.json();
-          setPendidikans(pendidikanData.data || []);
-        }
-      } catch (error) {
-        console.error('Error fetching pendidikans:', error);
-      }
-    } catch (error) {
-      console.error('Error fetching filter options:', error);
-    }
-  };
 
   const filterKuis = () => {
     let filtered = kuisList;
@@ -199,7 +132,7 @@ const AmbilKuisPage = () => {
 
   const handleJoinSuccess = (kelas) => {
     // Refresh kuis list after joining a class
-    fetchKuis();
+    refetchKuis();
     // Show success message
     alert(`Berhasil bergabung dengan kelas: ${kelas.name}`);
   };

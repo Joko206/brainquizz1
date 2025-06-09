@@ -1,18 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
 import { getConsistentScoreInfo } from '../utils/gradeUtils';
+import { useApiCache, useBatchApi } from '../hooks/useApiCache';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
-  const [stats, setStats] = useState({
-    totalKategori: 0,
-    totalTingkatan: 0,
-    totalPendidikan: 0,
-    totalKelas: 0,
-    totalKuis: 0,
-    totalSoal: 0,
-  });
+  const [totalSoal, setTotalSoal] = useState(0);
   const [userStats, setUserStats] = useState({
     completedQuizzes: 0,
     totalScore: 0,
@@ -39,10 +33,53 @@ const DashboardPage = () => {
     });
   }
 
-  useEffect(() => {
-    // Fetch dashboard data only once
-    fetchDashboardStats();
+  // Use cached API calls for better performance
+  const { data: kategoriData, loading: kategoriLoading } = useApiCache(
+    api.getKategori,
+    [],
+    { cacheKey: 'dashboard_kategori' }
+  );
 
+  const { data: tingkatanData, loading: tingkatanLoading } = useApiCache(
+    api.getTingkatan,
+    [],
+    { cacheKey: 'dashboard_tingkatan' }
+  );
+
+  const { data: pendidikanData, loading: pendidikanLoading } = useApiCache(
+    api.getPendidikan,
+    [],
+    { cacheKey: 'dashboard_pendidikan' }
+  );
+
+  const { data: kelasData, loading: kelasLoading } = useApiCache(
+    api.getKelas,
+    [],
+    { cacheKey: 'dashboard_kelas' }
+  );
+
+  const { data: kuisData, loading: kuisLoading } = useApiCache(
+    api.getKuis,
+    [],
+    { cacheKey: 'dashboard_kuis' }
+  );
+
+  // Calculate stats from cached data
+  const dashboardStats = useMemo(() => {
+    return {
+      totalKategori: kategoriData?.success ? kategoriData.data.length : 0,
+      totalTingkatan: tingkatanData?.success ? tingkatanData.data.length : 0,
+      totalPendidikan: pendidikanData?.success ? pendidikanData.data.length : 0,
+      totalKelas: kelasData?.success ? kelasData.data.length : 0,
+      totalKuis: kuisData?.success ? kuisData.data.length : 0,
+      totalSoal: totalSoal, // Will be calculated separately
+    };
+  }, [kategoriData, tingkatanData, pendidikanData, kelasData, kuisData, totalSoal]);
+
+  // Check if main data is loading
+  const mainDataLoading = kategoriLoading || tingkatanLoading || pendidikanLoading || kelasLoading || kuisLoading;
+
+  useEffect(() => {
     // Fetch user stats if we have userId
     const currentUserId = localStorage.getItem('userId');
     if (currentUserId) {
@@ -59,60 +96,55 @@ const DashboardPage = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const fetchDashboardStats = async () => {
-    try {
-      setLoading(true);
+  // Calculate total soal count with optimized batching
+  useEffect(() => {
+    const calculateTotalSoal = async () => {
+      if (!kuisData?.success || !kuisData.data) return;
 
-      // Fetch data with parallel requests for better performance
-      const [kategoriRes, tingkatanRes, pendidikanRes, kelasRes, kuisRes] = await Promise.allSettled([
-        api.getKategori().catch(() => ({ success: false, data: [] })),
-        api.getTingkatan().catch(() => ({ success: false, data: [] })),
-        api.getPendidikan().catch(() => ({ success: false, data: [] })),
-        api.getKelas().catch(() => ({ success: false, data: [] })),
-        api.getKuis().catch(() => ({ success: false, data: [] }))
-      ]);
+      try {
+        setLoading(true);
+        let totalSoal = 0;
 
-      // Count total soal from all kuis
-      let totalSoal = 0;
-      if (kuisRes.status === 'fulfilled' && kuisRes.value.success && kuisRes.value.data) {
-        const soalPromises = kuisRes.value.data.map(async (kuis) => {
-          try {
-            const soalRes = await api.getSoalByKuisID(kuis.ID || kuis.id);
-            return soalRes.success ? soalRes.data.length : 0;
-          } catch (error) {
-            return 0;
+        // Process in smaller batches to prevent server overload
+        const batchSize = 2;
+        const kuisList = kuisData.data;
+
+        for (let i = 0; i < kuisList.length; i += batchSize) {
+          const batch = kuisList.slice(i, i + batchSize);
+
+          const batchPromises = batch.map(async (kuis) => {
+            try {
+              // Add delay to prevent overwhelming server
+              await new Promise(resolve => setTimeout(resolve, Math.random() * 300 + 200));
+              const soalRes = await api.getSoalByKuisID(kuis.ID || kuis.id);
+              return soalRes.success ? soalRes.data.length : 0;
+            } catch (error) {
+              console.warn(`Failed to get soal count for kuis ${kuis.ID}:`, error);
+              return 0;
+            }
+          });
+
+          const batchResults = await Promise.all(batchPromises);
+          totalSoal += batchResults.reduce((sum, count) => sum + count, 0);
+
+          // Delay between batches
+          if (i + batchSize < kuisList.length) {
+            await new Promise(resolve => setTimeout(resolve, 800));
           }
-        });
+        }
 
-        const soalCounts = await Promise.all(soalPromises);
-        totalSoal = soalCounts.reduce((sum, count) => sum + count, 0);
+        setTotalSoal(totalSoal);
+      } catch (error) {
+        console.error("Error calculating total soal:", error);
+      } finally {
+        setLoading(false);
       }
+    };
 
-      const finalStats = {
-        totalKategori: kategoriRes.status === 'fulfilled' && kategoriRes.value.success ? kategoriRes.value.data.length : 0,
-        totalTingkatan: tingkatanRes.status === 'fulfilled' && tingkatanRes.value.success ? tingkatanRes.value.data.length : 0,
-        totalPendidikan: pendidikanRes.status === 'fulfilled' && pendidikanRes.value.success ? pendidikanRes.value.data.length : 0,
-        totalKelas: kelasRes.status === 'fulfilled' && kelasRes.value.success ? kelasRes.value.data.length : 0,
-        totalKuis: kuisRes.status === 'fulfilled' && kuisRes.value.success ? kuisRes.value.data.length : 0,
-        totalSoal: totalSoal,
-      };
-
-      setStats(finalStats);
-    } catch (error) {
-      console.error("Error fetching dashboard stats:", error);
-      // Fallback to default values if all fails
-      setStats({
-        totalKategori: 0,
-        totalTingkatan: 0,
-        totalPendidikan: 0,
-        totalKelas: 0,
-        totalKuis: 0,
-        totalSoal: 0,
-      });
-    } finally {
-      setLoading(false);
+    if (kuisData?.success && kuisData.data.length > 0) {
+      calculateTotalSoal();
     }
-  };
+  }, [kuisData]);
 
   const fetchUserStats = async () => {
     try {
@@ -469,12 +501,12 @@ const DashboardPage = () => {
       {(role === 'admin' || role === 'teacher') && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 lg:gap-6 mb-6 lg:mb-8 animate-slide-up">
           {[
-            { name: "Total Kategori", value: loading ? "..." : stats.totalKategori, icon: "🏷️", color: "from-blue-500 to-blue-600" },
-            { name: "Total Tingkatan", value: loading ? "..." : stats.totalTingkatan, icon: "📊", color: "from-emerald-500 to-emerald-600" },
-            { name: "Total Pendidikan", value: loading ? "..." : stats.totalPendidikan, icon: "🎓", color: "from-purple-500 to-purple-600" },
-            { name: "Total Kelas", value: loading ? "..." : stats.totalKelas, icon: "🏫", color: "from-orange-500 to-orange-600" },
-            { name: "Total Kuis", value: loading ? "..." : stats.totalKuis, icon: "📝", color: "from-pink-500 to-pink-600" },
-            { name: "Total Soal", value: loading ? "..." : stats.totalSoal, icon: "❓", color: "from-indigo-500 to-indigo-600" },
+            { name: "Total Kategori", value: mainDataLoading ? "..." : dashboardStats.totalKategori, icon: "🏷️", color: "from-blue-500 to-blue-600" },
+            { name: "Total Tingkatan", value: mainDataLoading ? "..." : dashboardStats.totalTingkatan, icon: "📊", color: "from-emerald-500 to-emerald-600" },
+            { name: "Total Pendidikan", value: mainDataLoading ? "..." : dashboardStats.totalPendidikan, icon: "🎓", color: "from-purple-500 to-purple-600" },
+            { name: "Total Kelas", value: mainDataLoading ? "..." : dashboardStats.totalKelas, icon: "🏫", color: "from-orange-500 to-orange-600" },
+            { name: "Total Kuis", value: mainDataLoading ? "..." : dashboardStats.totalKuis, icon: "📝", color: "from-pink-500 to-pink-600" },
+            { name: "Total Soal", value: (mainDataLoading || loading) ? "..." : dashboardStats.totalSoal, icon: "❓", color: "from-indigo-500 to-indigo-600" },
           ].map((stat, index) => (
             <div
               key={stat.name}
@@ -487,7 +519,7 @@ const DashboardPage = () => {
                 </div>
                 <p className="text-xs sm:text-sm font-semibold text-slate-600 mb-1 lg:mb-2 text-center leading-tight">{stat.name}</p>
                 <div className="text-lg sm:text-xl lg:text-3xl font-bold text-slate-800">
-                  {loading ? (
+                  {(mainDataLoading || (stat.name === "Total Soal" && loading)) ? (
                     <div className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
                   ) : (
                     stat.value

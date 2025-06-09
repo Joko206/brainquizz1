@@ -1,6 +1,7 @@
 import React from "react";
 import DataTable from "../../components/DataTable";
 import { api } from "../../services/api";
+import { BASE_URL } from "../../constants/api";
 
 const DaftarKelas = () => {
   const fields = [
@@ -79,7 +80,7 @@ const DaftarKelas = () => {
       if (!response.success) {
         throw new Error(response.message || "Gagal mengupdate kelas");
       }
-      return true;
+      return response;
     } catch (error) {
       console.error("Error saat mengupdate kelas:", error);
       throw error;
@@ -100,7 +101,7 @@ const DaftarKelas = () => {
       if (!response.success) {
         throw new Error(response.message || "Gagal menghapus kelas");
       }
-      return true;
+      return response;
     } catch (error) {
       console.error("Error saat menghapus kelas:", error);
       throw error;
@@ -110,7 +111,7 @@ const DaftarKelas = () => {
   return (
     <DataTable
       title="Daftar Kelas"
-      endpoint="https://brainquiz0.up.railway.app/kelas/get-kelas"
+      endpoint={`${BASE_URL}/kelas/get-kelas`}
       fields={fields}
       onAdd={handleAdd}
       onEdit={handleEdit}

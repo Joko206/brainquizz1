@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../services/api';
-import { apiRequest } from '../../utils/requestThrottle';
 import JoinCodeDisplay from '../../components/JoinCodeDisplay';
 
 const MyClassesPage = () => {
@@ -37,10 +36,8 @@ const MyClassesPage = () => {
     try {
       setLoading(true);
 
-      // Use high priority for main data fetch
-      const response = await apiRequest.immediate(async () => {
-        return api.getKelas();
-      });
+      // Fetch classes data
+      const response = await api.getKelas();
 
       if (response.success) {
         const classesData = response.data || [];
@@ -72,10 +69,8 @@ const MyClassesPage = () => {
       const kelasId = kelas.ID || kelas.id;
 
       try {
-        // Use request throttling untuk mengurangi database load
-        const kuisResponse = await apiRequest.background(async () => {
-          return api.getKuisByKelasId(kelasId);
-        });
+        // Fetch quiz count for this class
+        const kuisResponse = await api.getKuisByKelasId(kelasId);
 
         const kuisCount = kuisResponse.success ? (kuisResponse.data || []).length : 0;
 
@@ -84,9 +79,7 @@ const MyClassesPage = () => {
         const studentCount = 0;
 
         // Future implementation:
-        // const studentsResponse = await apiRequest.background(async () => {
-        //   return api.getStudentsByKelasId(kelasId);
-        // });
+        // const studentsResponse = await api.getStudentsByKelasId(kelasId);
         // const studentCount = studentsResponse.success ? (studentsResponse.data || []).length : 0;
 
         stats[kelasId] = {

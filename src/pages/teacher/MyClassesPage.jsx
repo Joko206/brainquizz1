@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../services/api';
+import { apiRequest } from '../../utils/requestThrottle';
 import JoinCodeDisplay from '../../components/JoinCodeDisplay';
 
 const MyClassesPage = () => {
@@ -32,16 +33,25 @@ const MyClassesPage = () => {
     };
   }, [openDropdown]);
 
-  const fetchClasses = async () => {
+  const fetchClasses = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.getKelas();
+
+      // Use high priority for main data fetch
+      const response = await apiRequest.immediate(async () => {
+        return api.getKelas();
+      });
+
       if (response.success) {
         const classesData = response.data || [];
         setClasses(classesData);
 
-        // Fetch stats for each class
-        await fetchClassStats(classesData);
+        // Fetch stats for each class with delay to prevent database overload
+        if (classesData.length > 0) {
+          setTimeout(() => {
+            fetchClassStats(classesData);
+          }, 500); // Delay stats fetch to reduce initial load
+        }
       } else {
         setError('Gagal memuat data kelas');
       }
@@ -51,51 +61,55 @@ const MyClassesPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchClassStats]);
 
-  const fetchClassStats = async (classesData) => {
+  const fetchClassStats = useCallback(async (classesData) => {
     setStatsLoading(true);
     const stats = {};
 
-    // Process classes in parallel for better performance
-    const statsPromises = classesData.map(async (kelas) => {
+    // Process classes sequentially to reduce database load
+    for (const kelas of classesData) {
       const kelasId = kelas.ID || kelas.id;
+
       try {
-        // Fetch quiz count for this class
-        const kuisResponse = await api.getKuisByKelasId(kelasId);
+        // Use request throttling untuk mengurangi database load
+        const kuisResponse = await apiRequest.background(async () => {
+          return api.getKuisByKelasId(kelasId);
+        });
+
         const kuisCount = kuisResponse.success ? (kuisResponse.data || []).length : 0;
 
-        // Fetch student count for this class (future ready)
-        const studentsResponse = await api.getStudentsByKelasId(kelasId);
-        const studentCount = studentsResponse.success ? (studentsResponse.data || []).length : 0;
+        // TODO: Fetch student count when backend implements /kelas/get-students/{kelasId}
+        // For now, set to 0 since the endpoint doesn't exist yet
+        const studentCount = 0;
 
-        return {
-          kelasId,
+        // Future implementation:
+        // const studentsResponse = await apiRequest.background(async () => {
+        //   return api.getStudentsByKelasId(kelasId);
+        // });
+        // const studentCount = studentsResponse.success ? (studentsResponse.data || []).length : 0;
+
+        stats[kelasId] = {
           kuisCount,
           studentCount
         };
+
+        // Add small delay between requests to prevent overwhelming database
+        await new Promise(resolve => setTimeout(resolve, 200));
+
       } catch (error) {
-        console.error(`Error fetching stats for class ${kelasId}:`, error);
-        return {
-          kelasId,
+        console.warn(`Error fetching stats for class ${kelasId}:`, error.message);
+        // Set default values for failed requests
+        stats[kelasId] = {
           kuisCount: 0,
           studentCount: 0
         };
       }
-    });
-
-    try {
-      const results = await Promise.all(statsPromises);
-      results.forEach(({ kelasId, kuisCount, studentCount }) => {
-        stats[kelasId] = { kuisCount, studentCount };
-      });
-      setClassStats(stats);
-    } catch (error) {
-      console.error('Error processing class stats:', error);
-    } finally {
-      setStatsLoading(false);
     }
-  };
+
+    setClassStats(stats);
+    setStatsLoading(false);
+  }, []);
 
   const handleEditClass = (kelas) => {
     setEditingClass(kelas);
@@ -324,7 +338,9 @@ const MyClassesPage = () => {
                         {statsLoading ? (
                           <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
                         ) : (
-                          classStats[kelas.ID || kelas.id]?.studentCount || 0
+                          <span title="Student count API belum tersedia">
+                            {classStats[kelas.ID || kelas.id]?.studentCount || 0}
+                          </span>
                         )}
                       </div>
                       <div className="text-xs text-gray-600">Siswa</div>

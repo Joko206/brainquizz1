@@ -23,16 +23,16 @@ const JoinKelasPage = () => {
         // Hanya tampilkan kelas yang sudah di-join oleh user
         setJoinedClasses(response.data || []);
       } else {
-        // Jika API belum ada, set empty array (tidak tampilkan kelas apapun)
-        console.log('API getJoinedClasses belum tersedia, menampilkan empty state');
+        // Jika tidak ada kelas yang di-join
+        console.log('Tidak ada kelas yang sudah di-join');
         setJoinedClasses([]);
-        setError(null); // Tidak error, hanya belum ada kelas yang di-join
+        setError(null);
       }
     } catch (error) {
       console.error('Error fetching joined classes:', error);
-      // Jika error, tampilkan empty state (tidak ada kelas yang di-join)
+      // Jika error, tampilkan empty state
       setJoinedClasses([]);
-      setError(null); // Tidak tampilkan error, hanya empty state
+      setError('Gagal memuat data kelas yang sudah bergabung');
     } finally {
       setLoading(false);
     }
@@ -58,8 +58,7 @@ const JoinKelasPage = () => {
       }
     } catch (error) {
       console.error('Error joining class:', error);
-      // Untuk sementara, jika API belum ada, tampilkan pesan
-      alert('Fitur join dengan kode belum tersedia. Backend API sedang dalam pengembangan.');
+      alert('Gagal bergabung dengan kelas: ' + (error.message || 'Terjadi kesalahan'));
     } finally {
       setJoiningClass(false);
     }

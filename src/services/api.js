@@ -1,3 +1,5 @@
+import { requestCache, getCacheTimeout } from '../utils/requestCache';
+
 const BASE_URL = import.meta.env.VITE_API_URL ||
   (import.meta.env.DEV ? "/api" : "https://brainquiz0.up.railway.app");
 
@@ -316,10 +318,10 @@ export const api = {
     }
   },
 
-  // Join Class with Code
+  // Join Class with Code - USING CORRECT BACKEND ENDPOINTS
   getJoinedClasses: async () => {
     try {
-      const response = await fetch(`${BASE_URL}/kelas/get-joined-classes`, {
+      const response = await fetch(`${BASE_URL}/kelas/get-kelas-by-user`, {
         method: "GET",
         headers: getAuthHeader(),
         credentials: 'include',
@@ -327,18 +329,13 @@ export const api = {
       return handleResponse(response);
     } catch (error) {
       console.error("Error fetching joined classes:", error);
-      // Return empty result for now (API not implemented yet)
-      return {
-        success: true,
-        data: [], // Empty array = no joined classes yet
-        message: "API not implemented yet"
-      };
+      throw error;
     }
   },
 
   joinClassWithCode: async (joinCode) => {
     try {
-      const response = await fetch(`${BASE_URL}/kelas/join-with-code`, {
+      const response = await fetch(`${BASE_URL}/kelas/join-by-code`, {
         method: "POST",
         headers: getAuthHeader(),
         credentials: 'include',
@@ -347,11 +344,7 @@ export const api = {
       return handleResponse(response);
     } catch (error) {
       console.error("Error joining class with code:", error);
-      // Return mock response for now (API not implemented yet)
-      return {
-        success: false,
-        message: "API join-with-code belum diimplementasi di backend"
-      };
+      throw error;
     }
   },
 
@@ -369,24 +362,16 @@ export const api = {
     }
   },
 
-  // Get students in a class (for future implementation)
+  // Get students in a class (API not implemented yet - return mock data)
   getStudentsByKelasId: async (kelasId) => {
-    try {
-      const response = await fetch(`${BASE_URL}/kelas/get-students/${kelasId}`, {
-        method: "GET",
-        headers: getAuthHeader(),
-        credentials: 'include',
-      });
-      return handleResponse(response);
-    } catch (error) {
-      console.error("Error fetching students by kelas id:", error);
-      // Return mock response for now (API not implemented yet)
-      return {
-        success: true,
-        data: [], // Empty array = no students yet
-        message: "API get-students belum diimplementasi di backend"
-      };
-    }
+    // API endpoint belum diimplementasi di backend
+    // Return mock response tanpa melakukan HTTP request
+    console.log(`getStudentsByKelasId(${kelasId}): API not implemented, returning mock data`);
+    return {
+      success: true,
+      data: [], // Empty array = no students yet
+      message: "API get-students belum diimplementasi di backend"
+    };
   },
 
   // Kuis

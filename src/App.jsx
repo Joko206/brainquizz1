@@ -219,6 +219,7 @@ const App = () => {
             </PrivateRoute>
           }
         />
+
         <Route
           path="/analytics"
           element={

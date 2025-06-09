@@ -32,34 +32,6 @@ const MyClassesPage = () => {
     };
   }, [openDropdown]);
 
-  const fetchClasses = useCallback(async () => {
-    try {
-      setLoading(true);
-
-      // Fetch classes data
-      const response = await api.getKelas();
-
-      if (response.success) {
-        const classesData = response.data || [];
-        setClasses(classesData);
-
-        // Fetch stats for each class with delay to prevent database overload
-        if (classesData.length > 0) {
-          setTimeout(() => {
-            fetchClassStats(classesData);
-          }, 500); // Delay stats fetch to reduce initial load
-        }
-      } else {
-        setError('Gagal memuat data kelas');
-      }
-    } catch (error) {
-      console.error('Error fetching classes:', error);
-      setError('Terjadi kesalahan saat memuat data');
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchClassStats]);
-
   const fetchClassStats = useCallback(async (classesData) => {
     setStatsLoading(true);
     const stats = {};
@@ -103,6 +75,34 @@ const MyClassesPage = () => {
     setClassStats(stats);
     setStatsLoading(false);
   }, []);
+
+  const fetchClasses = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      // Fetch classes data
+      const response = await api.getKelas();
+
+      if (response.success) {
+        const classesData = response.data || [];
+        setClasses(classesData);
+
+        // Fetch stats for each class with delay to prevent database overload
+        if (classesData.length > 0) {
+          setTimeout(() => {
+            fetchClassStats(classesData);
+          }, 500); // Delay stats fetch to reduce initial load
+        }
+      } else {
+        setError('Gagal memuat data kelas');
+      }
+    } catch (error) {
+      console.error('Error fetching classes:', error);
+      setError('Terjadi kesalahan saat memuat data');
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchClassStats]);
 
   const handleEditClass = (kelas) => {
     setEditingClass(kelas);

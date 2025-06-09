@@ -1,5 +1,3 @@
-import { requestCache, getCacheTimeout } from '../utils/requestCache';
-
 const BASE_URL = import.meta.env.VITE_API_URL ||
   (import.meta.env.DEV ? "/api" : "https://brainquiz0.up.railway.app");
 

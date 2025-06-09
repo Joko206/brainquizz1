@@ -1,5 +1,15 @@
 // API Configuration Constants - Railway Deployment
-export const BASE_URL = import.meta.env.VITE_API_URL || "https://brainquiz0.up.railway.app";
+export const BASE_URL = import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "/api" : "https://brainquiz0.up.railway.app");
+
+// Debug logging for development only
+if (import.meta.env.DEV) {
+  console.log('API Configuration:', {
+    VITE_API_URL: import.meta.env.VITE_API_URL,
+    BASE_URL: BASE_URL,
+    isDev: import.meta.env.DEV
+  });
+}
 
 // API Endpoints
 export const API_ENDPOINTS = {
@@ -82,10 +92,15 @@ export const HTTP_METHODS = {
 // Request Headers
 export const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
-  return {
-    'Authorization': `Bearer ${token}`,
+  const headers = {
     'Content-Type': 'application/json',
   };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  return headers;
 };
 
 // Request Configuration

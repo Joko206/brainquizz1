@@ -148,48 +148,67 @@ const DashboardPage = () => {
         let totalQuestions = 0;
         const recentResults = [];
 
-        for (const kuis of kuisRes.data) {
-          try {
-            const response = await fetch(`${BASE_URL}/hasil-kuis/${currentUserId}/${kuis.ID}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
-              credentials: 'include',
-            });
+        // Process quizzes in smaller batches to avoid server overload
+        const batchSize = 3;
+        for (let i = 0; i < kuisRes.data.length; i += batchSize) {
+          const batch = kuisRes.data.slice(i, i + batchSize);
 
-            if (response.ok) {
-              const data = await response.json();
-              const result = data.data;
+          const batchPromises = batch.map(async (kuis) => {
+            try {
+              // Add small delay to prevent overwhelming the server
+              await new Promise(resolve => setTimeout(resolve, Math.random() * 300));
 
-              const rawScore = result.score || result.Score || 0;
-              const correctAnswers = result.correct_answer || result.Correct_Answer || 0;
-
-              // Get question count
-              const soalRes = await api.getSoalByKuisID(kuis.ID);
-              const questionCount = soalRes.success ? soalRes.data.length : 0;
-
-              // Normalize score to handle legacy data
-              const scoreInfo = getConsistentScoreInfo(rawScore, correctAnswers, questionCount);
-
-              completedQuizzes++;
-              totalScore += scoreInfo.score; // Use normalized score
-              totalCorrectAnswers += correctAnswers;
-              totalQuestions += questionCount;
-
-              recentResults.push({
-                kuisTitle: kuis.title,
-                score: scoreInfo.score,
-                grade: scoreInfo.grade,
-                date: result.updated_at || result.UpdatedAt || new Date().toISOString()
+              const response = await fetch(`${BASE_URL}/hasil-kuis/${currentUserId}/${kuis.ID}`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+                credentials: 'include',
               });
-            } else if (response.status === 404) {
-              // Quiz not completed by user - skip silently without logging
-              continue;
+
+              if (response.ok) {
+                const data = await response.json();
+                const result = data.data;
+
+                const rawScore = result.score || result.Score || 0;
+                const correctAnswers = result.correct_answer || result.Correct_Answer || 0;
+
+                // Get question count
+                const soalRes = await api.getSoalByKuisID(kuis.ID);
+                const questionCount = soalRes.success ? soalRes.data.length : 0;
+
+                // Normalize score to handle legacy data
+                const scoreInfo = getConsistentScoreInfo(rawScore, correctAnswers, questionCount);
+
+                completedQuizzes++;
+                totalScore += scoreInfo.score; // Use normalized score
+                totalCorrectAnswers += correctAnswers;
+                totalQuestions += questionCount;
+
+                recentResults.push({
+                  kuisTitle: kuis.title,
+                  score: scoreInfo.score,
+                  grade: scoreInfo.grade,
+                  date: result.updated_at || result.UpdatedAt || new Date().toISOString()
+                });
+              } else if (response.status === 404) {
+                // Quiz not completed by user - skip silently without logging
+                return null;
+              } else {
+                console.warn(`HTTP ${response.status} for quiz ${kuis.ID}:`, response.statusText);
+                return null;
+              }
+            } catch (error) {
+              console.warn(`Failed to get result for quiz ${kuis.ID}:`, error.message);
+              return null;
             }
-          } catch (error) {
-            // Network error or other issues - skip silently
-            continue;
+          });
+
+          const batchResults = await Promise.all(batchPromises);
+
+          // Add delay between batches
+          if (i + batchSize < kuisRes.data.length) {
+            await new Promise(resolve => setTimeout(resolve, 800));
           }
         }
 

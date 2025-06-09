@@ -85,72 +85,104 @@ const HasilKuisPage = () => {
 
   const fetchHasilKuis = async (kuisList) => {
     const token = localStorage.getItem('token');
-    const hasilPromises = kuisList.map(async (kuis) => {
-      try {
-        // First, get the number of questions for this quiz
-        let questionCount = 1; // Default fallback
+
+    // Process quizzes in smaller batches to avoid overwhelming the server
+    const batchSize = 3;
+    const hasil = [];
+
+    for (let i = 0; i < kuisList.length; i += batchSize) {
+      const batch = kuisList.slice(i, i + batchSize);
+
+      const batchPromises = batch.map(async (kuis) => {
         try {
-          const soalResponse = await fetch(`${BASE_URL}/soal/get-soal/${kuis.ID}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-          });
-          if (soalResponse.ok) {
-            const soalData = await soalResponse.json();
-            questionCount = soalData.data ? soalData.data.length : 1;
+          // Add delay between requests to prevent server overload
+          await new Promise(resolve => setTimeout(resolve, Math.random() * 500));
+
+          // First, get the number of questions for this quiz
+          let questionCount = 1; // Default fallback
+          try {
+            const soalResponse = await fetch(`${BASE_URL}/soal/get-soal/${kuis.ID}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+            });
+            if (soalResponse.ok) {
+              const soalData = await soalResponse.json();
+              questionCount = soalData.data ? soalData.data.length : 1;
+            }
+          } catch (soalError) {
+            console.warn(`Failed to get question count for quiz ${kuis.ID}:`, soalError.message);
+            questionCount = 1;
           }
-        } catch (soalError) {
-          // If we can't get question count, use fallback
-          questionCount = 1;
-        }
 
-        // Then get the quiz result
-        const response = await fetch(`${BASE_URL}/hasil-kuis/${userId}/${kuis.ID}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
+          // Then get the quiz result with better error handling
+          try {
+            const response = await fetch(`${BASE_URL}/hasil-kuis/${userId}/${kuis.ID}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+            });
 
-        if (response.ok) {
-          const data = await response.json();
+            if (response.ok) {
+              const data = await response.json();
+              return {
+                ...data.data,
+                kuis: { ...kuis, soal_count: questionCount },
+                hasResult: true
+              };
+            } else if (response.status === 404) {
+              // Quiz not completed by user - no result available
+              return {
+                kuis: { ...kuis, soal_count: questionCount },
+                hasResult: false,
+                score: 0,
+                correct_answer: 0
+              };
+            } else {
+              console.warn(`HTTP ${response.status} for quiz ${kuis.ID}:`, response.statusText);
+              return {
+                kuis: { ...kuis, soal_count: questionCount },
+                hasResult: false,
+                score: 0,
+                correct_answer: 0,
+                error: `HTTP ${response.status}`
+              };
+            }
+          } catch (resultError) {
+            console.warn(`Failed to get result for quiz ${kuis.ID}:`, resultError.message);
+            return {
+              kuis: { ...kuis, soal_count: questionCount },
+              hasResult: false,
+              score: 0,
+              correct_answer: 0,
+              error: resultError.message
+            };
+          }
+        } catch (error) {
+          console.error(`Error processing quiz ${kuis.ID}:`, error);
           return {
-            ...data.data,
-            kuis: { ...kuis, soal_count: questionCount },
-            hasResult: true
-          };
-        } else if (response.status === 404) {
-          // Quiz not completed by user - no result available
-          return {
-            kuis: { ...kuis, soal_count: questionCount },
+            kuis: { ...kuis, soal_count: 1 },
             hasResult: false,
             score: 0,
-            correct_answer: 0
-          };
-        } else {
-          // Other HTTP errors
-          return {
-            kuis: { ...kuis, soal_count: questionCount },
-            hasResult: false,
-            score: 0,
-            correct_answer: 0
+            correct_answer: 0,
+            error: error.message
           };
         }
-      } catch (error) {
-        // Network error or other issues - skip silently
-        return {
-          kuis: { ...kuis, soal_count: 1 },
-          hasResult: false,
-          score: 0,
-          correct_answer: 0
-        };
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      hasil.push(...batchResults);
+
+      // Add delay between batches
+      if (i + batchSize < kuisList.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
-    });
+    }
 
-    const hasil = await Promise.all(hasilPromises);
     setHasilKuisList(hasil);
   };
 

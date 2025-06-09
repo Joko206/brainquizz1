@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { userAPI } from "../../services/quizApi";
+
 import Button from "../../components/UI/Button";
 import Input from "../../components/UI/Input";
 import Select from "../../components/UI/Select";
@@ -15,6 +16,8 @@ const SignupPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
+
+
 
   const handleSignup = async (e) => {
     e.preventDefault();
@@ -58,7 +61,19 @@ const SignupPage = () => {
       }
     } catch (err) {
       console.error("Error saat registrasi:", err);
-      setError(err.message || "Terjadi kesalahan jaringan. Silakan periksa koneksi internet Anda.");
+
+      // More specific error messages
+      let errorMessage = "Terjadi kesalahan saat mendaftar.";
+
+      if (err.message.includes("terhubung ke server")) {
+        errorMessage = "Tidak dapat terhubung ke server. Periksa koneksi internet Anda.";
+      } else if (err.message.includes("fetch")) {
+        errorMessage = "Gagal menghubungi server. Silakan coba lagi nanti.";
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -158,6 +173,8 @@ const SignupPage = () => {
                 </div>
               )}
             </Button>
+
+
 
             <div className="text-center">
               <p className="text-sm text-gray-600">

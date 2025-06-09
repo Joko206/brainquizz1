@@ -1,6 +1,15 @@
 const BASE_URL = import.meta.env.VITE_API_URL ||
   (import.meta.env.DEV ? "/api" : "https://brainquiz0.up.railway.app");
 
+// Debug logging for development only
+if (import.meta.env.DEV) {
+  console.log('API Configuration (api.js):', {
+    VITE_API_URL: import.meta.env.VITE_API_URL,
+    BASE_URL: BASE_URL,
+    isDev: import.meta.env.DEV
+  });
+}
+
 const getAuthHeader = () => {
   const token = localStorage.getItem("token");
   const headers = {

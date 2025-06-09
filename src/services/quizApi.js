@@ -19,6 +19,15 @@ const apiCall = async (endpoint, options = {}) => {
   };
 
   try {
+    // Debug logging for development
+    if (import.meta.env.DEV) {
+      console.log('API Call Debug:', {
+        url,
+        method: mergedOptions.method || 'GET',
+        hasAuth: !!mergedOptions.headers?.Authorization
+      });
+    }
+
     const response = await fetch(url, mergedOptions);
 
     // Check if response has content
@@ -39,16 +48,27 @@ const apiCall = async (endpoint, options = {}) => {
     }
 
     if (!response.ok) {
+      if (import.meta.env.DEV) {
+        console.error('API Error:', {
+          status: response.status,
+          statusText: response.statusText,
+          url: url,
+          data: data
+        });
+      }
+
       throw new Error(data?.message || `HTTP error! status: ${response.status} - ${response.statusText}`);
     }
 
     return data;
   } catch (error) {
-    console.error('API call failed:', error);
+    if (import.meta.env.DEV) {
+      console.error('API call failed:', error);
+    }
 
-    // Handle network errors
+    // Handle network errors with more specific messages
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      throw new Error('Tidak dapat terhubung ke server. Pastikan backend sedang berjalan.');
+      throw new Error('Tidak dapat terhubung ke server. Periksa koneksi internet Anda atau coba lagi nanti.');
     }
 
     throw error;

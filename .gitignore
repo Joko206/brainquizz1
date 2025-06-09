@@ -22,3 +22,29 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Documentation and reports (temporary files)
+*_REPORT.md
+*_FIX.md
+*_AUDIT.md
+
+# Environment variables (keep .env for reference but ignore sensitive ones)
+.env.local
+.env.production
+.env.development
+
+# Build and deployment
+build/
+dist/
+.vercel/
+
+# Testing and debugging
+coverage/
+.nyc_output/
+test-results/
+
+# OS generated files
+Thumbs.db
+.DS_Store?
+ehthumbs.db
+Icon?

@@ -50,16 +50,17 @@ const RecommendationPage = () => {
   const fetchRecommendations = async () => {
     try {
       setLoading(true);
-      
-      // Fetch all required data
-      const [kuisRes, kategoriRes, tingkatanRes] = await Promise.all([
+
+      // OPTIMIZED: Fetch all required data including hasil kuis in single call
+      const [kuisRes, kategoriRes, tingkatanRes, hasilRes] = await Promise.all([
         api.getKuis(),
         api.getKategori(),
-        api.getTingkatan()
+        api.getTingkatan(),
+        api.getMyHasilKuis()
       ]);
 
       if (kuisRes.success && kategoriRes.success && tingkatanRes.success) {
-        await generateRecommendations(kuisRes.data, kategoriRes.data, tingkatanRes.data);
+        await generateRecommendations(kuisRes.data, kategoriRes.data, tingkatanRes.data, hasilRes.success ? hasilRes.data : []);
       }
     } catch (error) {
       console.error('Error fetching recommendations:', error);
@@ -68,11 +69,10 @@ const RecommendationPage = () => {
     }
   };
 
-  const generateRecommendations = async (allKuis, allKategori, allTingkatan) => {
-    const token = localStorage.getItem('token');
+  const generateRecommendations = async (allKuis, allKategori, allTingkatan, hasilKuisList) => {
     const completedQuizIds = new Set();
     const categoryPerformance = {};
-    
+
     // Initialize category performance tracking
     allKategori.forEach(kategori => {
       categoryPerformance[kategori.ID] = {
@@ -83,31 +83,27 @@ const RecommendationPage = () => {
       };
     });
 
-    // Check which quizzes user has completed
-    for (const kuis of allKuis) {
+    // OPTIMIZED: Process results from single API call
+    for (const hasil of hasilKuisList) {
       try {
-        const response = await fetch(`${BASE_URL}/hasil-kuis/${userId}/${kuis.ID}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
+        // Find the corresponding quiz
+        const kuis = allKuis.find(k => k.ID === hasil.kuis_id);
+        if (!kuis) continue;
 
-        if (response.ok) {
-          const data = await response.json();
-          const result = data.data;
-          completedQuizIds.add(kuis.ID);
-          
-          // Track category performance
-          const score = result.score || result.Score || 0;
-          if (categoryPerformance[kuis.kategori_id]) {
-            categoryPerformance[kuis.kategori_id].totalScore += score;
-            categoryPerformance[kuis.kategori_id].count++;
-          }
+        completedQuizIds.add(kuis.ID);
+
+        // Track category performance
+        const score = hasil.score || 0;
+        if (categoryPerformance[kuis.kategori_id]) {
+          categoryPerformance[kuis.kategori_id].totalScore += score;
+          categoryPerformance[kuis.kategori_id].count++;
         }
+
+        // Small delay to prevent overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 50));
       } catch (error) {
-        // Quiz not completed, continue
+        console.error(`Error processing quiz result ${hasil.kuis_id}:`, error);
+        // Continue with next result
       }
     }
 

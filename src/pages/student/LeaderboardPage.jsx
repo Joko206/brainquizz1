@@ -47,16 +47,17 @@ const LeaderboardPage = () => {
   const fetchLeaderboard = async () => {
     try {
       setLoading(true);
-      
-      // Fetch all required data
-      const [kuisRes, kategoriRes] = await Promise.all([
+
+      // OPTIMIZED: Fetch all required data including hasil kuis in single call
+      const [kuisRes, kategoriRes, hasilRes] = await Promise.all([
         api.getKuis(),
-        api.getKategori()
+        api.getKategori(),
+        api.getMyHasilKuis()
       ]);
 
       if (kuisRes.success && kategoriRes.success) {
         setCategories(kategoriRes.data);
-        await calculateLeaderboard(kuisRes.data, kategoriRes.data);
+        await calculateLeaderboard(kuisRes.data, kategoriRes.data, hasilRes.success ? hasilRes.data : []);
       }
     } catch (error) {
       console.error('Error fetching leaderboard:', error);
@@ -65,17 +66,13 @@ const LeaderboardPage = () => {
     }
   };
 
-  const calculateLeaderboard = async (allKuis, allKategori) => {
-    const token = localStorage.getItem('token');
-
+  const calculateLeaderboard = async (allKuis, allKategori, hasilKuisList) => {
     // Filter quizzes by category if needed
     const filteredKuis = filter === 'all'
       ? allKuis
       : allKuis.filter(kuis => kuis.kategori_id === parseInt(filter));
 
-    // REAL APPROACH: Only show current user's performance
-    // Since we can't access other users' data without backend changes
-
+    // OPTIMIZED: Only show current user's performance using single API call data
     const userStats = {
       name: userName,
       totalScore: 0,
@@ -87,28 +84,30 @@ const LeaderboardPage = () => {
       quizDetails: []
     };
 
-    // Check each quiz for current user only
+    // Create a map of quiz results by kuis_id for quick lookup
+    const hasilMap = new Map();
+    hasilKuisList.forEach(hasil => {
+      hasilMap.set(hasil.kuis_id, hasil);
+    });
+
+    // OPTIMIZED: Process results from single API call
     for (const kuis of filteredKuis) {
       try {
-        // Get number of questions in this quiz
-        const soalRes = await api.getSoalByKuisID(kuis.ID);
-        const questionCount = soalRes.success ? soalRes.data.length : 0;
-
         // Check if user has completed this quiz
-        const response = await fetch(`${BASE_URL}/hasil-kuis/${userId}/${kuis.ID}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
+        const hasilKuis = hasilMap.get(kuis.ID);
 
-        if (response.ok) {
-          const data = await response.json();
-          const result = data.data;
+        if (hasilKuis) {
+          // Get number of questions in this quiz
+          let questionCount = 1; // Default fallback
+          try {
+            const soalRes = await api.getSoalByKuisID(kuis.ID);
+            questionCount = soalRes.success ? soalRes.data.length : 1;
+          } catch (soalError) {
+            console.warn(`Failed to get question count for quiz ${kuis.ID}:`, soalError.message);
+          }
 
-          const rawScore = result.score || result.Score || 0;
-          const correctAnswers = result.correct_answer || result.Correct_Answer || 0;
+          const rawScore = hasilKuis.score || 0;
+          const correctAnswers = hasilKuis.correct_answer || 0;
 
           // Get consistent score info
           const scoreInfo = getConsistentScoreInfo(rawScore, correctAnswers, questionCount);
@@ -126,11 +125,15 @@ const LeaderboardPage = () => {
             correctAnswers: correctAnswers,
             totalQuestions: questionCount,
             accuracy: scoreInfo.percentage,
-            date: result.updated_at || result.UpdatedAt || new Date().toISOString()
+            date: hasilKuis.updated_at || hasilKuis.UpdatedAt || new Date().toISOString()
           });
+
+          // Small delay to prevent overwhelming the server
+          await new Promise(resolve => setTimeout(resolve, 50));
         }
       } catch (error) {
-        // User hasn't completed this quiz, continue
+        console.error(`Error processing quiz ${kuis.ID}:`, error);
+        // Continue with next quiz
       }
     }
 

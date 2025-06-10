@@ -62,17 +62,18 @@ const StudyPlannerPage = () => {
   const fetchStudyData = async () => {
     try {
       setLoading(true);
-      
-      // Fetch categories and quizzes
-      const [kategoriRes, kuisRes] = await Promise.all([
+
+      // OPTIMIZED: Fetch categories, quizzes, and hasil kuis in parallel
+      const [kategoriRes, kuisRes, hasilRes] = await Promise.all([
         api.getKategori(),
-        api.getKuis()
+        api.getKuis(),
+        api.getMyHasilKuis()
       ]);
 
       if (kategoriRes.success && kuisRes.success) {
         setCategories(kategoriRes.data);
-        await calculateStudyProgress(kuisRes.data);
-        generateStudyPlan(kuisRes.data, kategoriRes.data);
+        await calculateStudyProgress(kuisRes.data, hasilRes.success ? hasilRes.data : []);
+        generateStudyPlan(kuisRes.data, kategoriRes.data, hasilRes.success ? hasilRes.data : []);
       }
     } catch (error) {
       console.error('Error fetching study data:', error);
@@ -81,10 +82,7 @@ const StudyPlannerPage = () => {
     }
   };
 
-  const calculateStudyProgress = async (allKuis) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
+  const calculateStudyProgress = async (allKuis, hasilKuisList) => {
     const today = new Date();
     const thisWeekStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
 
@@ -96,51 +94,41 @@ const StudyPlannerPage = () => {
     let needsReview = 0;
     let perfectScores = 0;
 
-    // Fetch real quiz results for each quiz
-    for (const kuis of allKuis) {
+    // OPTIMIZED: Process results from single API call
+    for (const hasil of hasilKuisList) {
       try {
-        const response = await fetch(`${BASE_URL}/hasil-kuis/${userId}/${kuis.ID}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
+        // Parse completion date from CreatedAt
+        const completionDate = new Date(hasil.CreatedAt || hasil.created_at || new Date());
+        completedDates.push(completionDate);
+        totalQuizzesCompleted++;
 
-        if (response.ok) {
-          const data = await response.json();
-          const result = data.data;
+        // Calculate score statistics
+        const score = hasil.score || 0;
+        totalScore += score;
 
-          // Parse completion date from CreatedAt
-          const completionDate = new Date(result.CreatedAt);
-          completedDates.push(completionDate);
-          totalQuizzesCompleted++;
-
-          // Calculate score statistics
-          const score = result.score || 0;
-          totalScore += score;
-
-          if (score === 100) {
-            perfectScores++;
-          }
-
-          if (score < 80) {
-            needsReview++;
-          }
-
-          // Check if completed today
-          if (completionDate.toDateString() === today.toDateString()) {
-            todayCompleted++;
-          }
-
-          // Check if completed this week
-          if (completionDate >= thisWeekStart) {
-            weekCompleted++;
-          }
+        if (score === 100) {
+          perfectScores++;
         }
+
+        if (score < 80) {
+          needsReview++;
+        }
+
+        // Check if completed today
+        if (completionDate.toDateString() === today.toDateString()) {
+          todayCompleted++;
+        }
+
+        // Check if completed this week
+        if (completionDate >= thisWeekStart) {
+          weekCompleted++;
+        }
+
+        // Small delay to prevent overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 50));
       } catch (error) {
-        // Continue if error fetching individual quiz result
-        continue;
+        console.error(`Error processing quiz result ${hasil.kuis_id}:`, error);
+        // Continue with next result
       }
     }
 
@@ -216,12 +204,12 @@ const StudyPlannerPage = () => {
     return { currentStreak, longestStreak };
   };
 
-  const generateStudyPlan = async (allKuis, allKategori) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
-    // Get user's quiz completion status
-    const quizCompletionStatus = await getQuizCompletionStatus(allKuis, token);
+  const generateStudyPlan = async (allKuis, allKategori, hasilKuisList) => {
+    // OPTIMIZED: Create completion status from single API call data
+    const quizCompletionStatus = {};
+    hasilKuisList.forEach(hasil => {
+      quizCompletionStatus[hasil.kuis_id] = hasil;
+    });
 
     // Filter quizzes based on selected category
     const filteredKuis = selectedCategory === 'all'
@@ -293,29 +281,11 @@ const StudyPlannerPage = () => {
     setPlannedQuizzes(plannedQuizzes);
   };
 
+  // OPTIMIZED: This function is no longer needed as we get data from single API call
   const getQuizCompletionStatus = async (allKuis, token) => {
-    const completionStatus = {};
-
-    for (const kuis of allKuis) {
-      try {
-        const response = await fetch(`${BASE_URL}/hasil-kuis/${userId}/${kuis.ID}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          completionStatus[kuis.ID] = data.data;
-        }
-      } catch (error) {
-        // Continue if error
-      }
-    }
-
-    return completionStatus;
+    // This function is kept for backward compatibility but not used
+    // Data is now processed from hasilKuisList in generateStudyPlan
+    return {};
   };
 
   const updateGoal = (type, value) => {

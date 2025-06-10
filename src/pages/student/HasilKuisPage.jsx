@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getConsistentScoreInfo } from '../../utils/gradeUtils';
+import { api } from '../../services/api';
 
 // Use the same BASE_URL logic as other components
 const BASE_URL = import.meta.env.VITE_API_URL ||
@@ -49,7 +50,7 @@ const HasilKuisPage = () => {
 
   useEffect(() => {
     if (userId) {
-      fetchKuis();
+      fetchData();
     }
   }, [userId]);
 
@@ -57,109 +58,89 @@ const HasilKuisPage = () => {
     filterHasil();
   }, [hasilKuisList, searchTerm]);
 
-  const fetchKuis = async () => {
+  // OPTIMIZED: Fetch all data in single API calls
+  const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${BASE_URL}/kuis/get-kuis`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-      });
+      setLoading(true);
 
-      if (response.ok) {
-        const data = await response.json();
-        const kuis = data.data || [];
-        setKuisList(kuis);
-        
-        // Fetch hasil untuk setiap kuis
-        await fetchHasilKuis(kuis);
+      // Fetch all kuis and hasil kuis in parallel using optimized endpoints
+      const [kuisResponse, hasilResponse] = await Promise.all([
+        api.getKuis(),
+        api.getMyHasilKuis()
+      ]);
+
+      if (kuisResponse.success) {
+        const kuisList = kuisResponse.data || [];
+        setKuisList(kuisList);
+
+        if (hasilResponse.success) {
+          const hasilKuisList = hasilResponse.data || [];
+
+          // Process and combine data
+          const processedHasil = await processHasilData(kuisList, hasilKuisList);
+          setHasilKuisList(processedHasil);
+        } else {
+          // If no results yet, show all quizzes as not completed
+          const processedHasil = kuisList.map(kuis => ({
+            kuis: { ...kuis, soal_count: 1 }, // Default count
+            hasResult: false,
+            score: 0,
+            correct_answer: 0
+          }));
+          setHasilKuisList(processedHasil);
+        }
       }
     } catch (error) {
-      console.error('Error fetching kuis:', error);
+      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchHasilKuis = async (kuisList) => {
-    const token = localStorage.getItem('token');
+  // OPTIMIZED: Process hasil data from single API call
+  const processHasilData = async (kuisList, hasilKuisList) => {
+    // Create a map of quiz results by kuis_id for quick lookup
+    const hasilMap = new Map();
+    hasilKuisList.forEach(hasil => {
+      hasilMap.set(hasil.kuis_id, hasil);
+    });
 
-    // Process quizzes in smaller batches to avoid overwhelming the server
-    const batchSize = 3;
-    const hasil = [];
+    // Process each quiz and match with results
+    const processedData = [];
 
+    // Process in smaller batches to get question counts efficiently
+    const batchSize = 5;
     for (let i = 0; i < kuisList.length; i += batchSize) {
       const batch = kuisList.slice(i, i + batchSize);
 
       const batchPromises = batch.map(async (kuis) => {
         try {
-          // Add delay between requests to prevent server overload
-          await new Promise(resolve => setTimeout(resolve, Math.random() * 500));
-
-          // First, get the number of questions for this quiz
+          // Get question count for this quiz
           let questionCount = 1; // Default fallback
           try {
-            const soalResponse = await fetch(`${BASE_URL}/soal/get-soal/${kuis.ID}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
-              credentials: 'include',
-            });
-            if (soalResponse.ok) {
-              const soalData = await soalResponse.json();
-              questionCount = soalData.data ? soalData.data.length : 1;
-            }
+            const soalResponse = await api.getSoalByKuisID(kuis.ID);
+            questionCount = soalResponse.success ? soalResponse.data.length : 1;
           } catch (soalError) {
             console.warn(`Failed to get question count for quiz ${kuis.ID}:`, soalError.message);
-            questionCount = 1;
           }
 
-          // Then get the quiz result with better error handling
-          try {
-            const response = await fetch(`${BASE_URL}/hasil-kuis/${userId}/${kuis.ID}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
-              credentials: 'include',
-            });
+          // Check if user has completed this quiz
+          const hasilKuis = hasilMap.get(kuis.ID);
 
-            if (response.ok) {
-              const data = await response.json();
-              return {
-                ...data.data,
-                kuis: { ...kuis, soal_count: questionCount },
-                hasResult: true
-              };
-            } else if (response.status === 404) {
-              // Quiz not completed by user - no result available
-              return {
-                kuis: { ...kuis, soal_count: questionCount },
-                hasResult: false,
-                score: 0,
-                correct_answer: 0
-              };
-            } else {
-              console.warn(`HTTP ${response.status} for quiz ${kuis.ID}:`, response.statusText);
-              return {
-                kuis: { ...kuis, soal_count: questionCount },
-                hasResult: false,
-                score: 0,
-                correct_answer: 0,
-                error: `HTTP ${response.status}`
-              };
-            }
-          } catch (resultError) {
-            console.warn(`Failed to get result for quiz ${kuis.ID}:`, resultError.message);
+          if (hasilKuis) {
+            // User has completed this quiz
+            return {
+              ...hasilKuis,
+              kuis: { ...kuis, soal_count: questionCount },
+              hasResult: true
+            };
+          } else {
+            // User hasn't completed this quiz
             return {
               kuis: { ...kuis, soal_count: questionCount },
               hasResult: false,
               score: 0,
-              correct_answer: 0,
-              error: resultError.message
+              correct_answer: 0
             };
           }
         } catch (error) {
@@ -175,15 +156,15 @@ const HasilKuisPage = () => {
       });
 
       const batchResults = await Promise.all(batchPromises);
-      hasil.push(...batchResults);
+      processedData.push(...batchResults);
 
-      // Add delay between batches
+      // Small delay between batches to prevent overwhelming the server
       if (i + batchSize < kuisList.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 
-    setHasilKuisList(hasil);
+    return processedData;
   };
 
   const filterHasil = () => {

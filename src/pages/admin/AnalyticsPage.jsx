@@ -45,15 +45,16 @@ const AnalyticsPage = () => {
   const fetchAnalytics = async () => {
     try {
       setLoading(true);
-      
-      // Fetch all required data
-      const [kuisRes, kategoriRes] = await Promise.all([
+
+      // OPTIMIZED: Fetch all required data including hasil kuis in single call
+      const [kuisRes, kategoriRes, hasilRes] = await Promise.all([
         api.getKuis(),
-        api.getKategori()
+        api.getKategori(),
+        api.getMyHasilKuis()
       ]);
 
       if (kuisRes.success && kategoriRes.success) {
-        await calculateAnalytics(kuisRes.data, kategoriRes.data);
+        await calculateAnalytics(kuisRes.data, kategoriRes.data, hasilRes.success ? hasilRes.data : []);
       }
     } catch (error) {
       console.error('Error fetching analytics:', error);
@@ -62,8 +63,7 @@ const AnalyticsPage = () => {
     }
   };
 
-  const calculateAnalytics = async (allKuis, allKategori) => {
-    const token = localStorage.getItem('token');
+  const calculateAnalytics = async (allKuis, allKategori, hasilKuisList) => {
     let completedQuizzes = 0;
     let totalScore = 0;
     let categoryStats = {};
@@ -80,57 +80,58 @@ const AnalyticsPage = () => {
       };
     });
 
-    // Check each quiz for user results
-    for (const kuis of allKuis) {
-      // Count total quizzes per category
+    // Count total quizzes per category
+    allKuis.forEach(kuis => {
       if (categoryStats[kuis.kategori_id]) {
         categoryStats[kuis.kategori_id].total++;
       }
+    });
 
+    // OPTIMIZED: Process results from single API call
+    for (const hasil of hasilKuisList) {
       try {
-        // Check if user has completed this quiz
-        const response = await fetch(`${BASE_URL}/hasil-kuis/${userId}/${kuis.ID}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
+        // Find the corresponding quiz
+        const kuis = allKuis.find(k => k.ID === hasil.kuis_id);
+        if (!kuis) continue;
+
+        completedQuizzes++;
+        const rawScore = hasil.score || 0;
+        const correctAnswers = hasil.correct_answer || 0;
+
+        // Get question count for this quiz
+        let questionCount = 1; // Default fallback
+        try {
+          const soalRes = await api.getSoalByKuisID(kuis.ID);
+          questionCount = soalRes.success ? soalRes.data.length : 1;
+        } catch (soalError) {
+          console.warn(`Failed to get question count for quiz ${kuis.ID}:`, soalError.message);
+        }
+
+        // Get consistent score info
+        const scoreInfo = getConsistentScoreInfo(rawScore, correctAnswers, questionCount);
+
+        totalScore += scoreInfo.score;
+
+        // Add to category stats
+        if (categoryStats[kuis.kategori_id]) {
+          categoryStats[kuis.kategori_id].completed++;
+          categoryStats[kuis.kategori_id].totalScore += scoreInfo.score;
+        }
+
+        // Add to recent results
+        recentResults.push({
+          kuisTitle: kuis.title,
+          score: scoreInfo.score,
+          correctAnswers: correctAnswers,
+          date: hasil.updated_at || hasil.UpdatedAt || new Date().toISOString(),
+          kategori: allKategori.find(k => k.ID === kuis.kategori_id)?.name || 'Unknown'
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          const result = data.data;
-
-          completedQuizzes++;
-          const rawScore = result.score || result.Score || 0;
-          const correctAnswers = result.correct_answer || result.Correct_Answer || 0;
-
-          // Get question count for this quiz
-          const soalRes = await api.getSoalByKuisID(kuis.ID);
-          const questionCount = soalRes.success ? soalRes.data.length : 0;
-
-          // Get consistent score info
-          const scoreInfo = getConsistentScoreInfo(rawScore, correctAnswers, questionCount);
-
-          totalScore += scoreInfo.score;
-
-          // Add to category stats
-          if (categoryStats[kuis.kategori_id]) {
-            categoryStats[kuis.kategori_id].completed++;
-            categoryStats[kuis.kategori_id].totalScore += scoreInfo.score;
-          }
-
-          // Add to recent results
-          recentResults.push({
-            kuisTitle: kuis.title,
-            score: scoreInfo.score,
-            correctAnswers: correctAnswers,
-            date: result.updated_at || result.UpdatedAt || new Date().toISOString(),
-            kategori: allKategori.find(k => k.ID === kuis.kategori_id)?.name || 'Unknown'
-          });
-        }
+        // Small delay to prevent overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 50));
       } catch (error) {
-        // Quiz not completed by user, skip
+        console.error(`Error processing quiz result ${hasil.kuis_id}:`, error);
+        // Continue with next result
       }
     }
 

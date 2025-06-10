@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { getConsistentScoreInfo } from '../../utils/gradeUtils';
 
-const BASE_URL = import.meta.env.VITE_API_URL ||
-  (import.meta.env.DEV ? "/api" : "https://brainquiz0.up.railway.app");
+
 
 const AchievementsPage = () => {
   const [achievements, setAchievements] = useState([]);
@@ -48,14 +47,16 @@ const AchievementsPage = () => {
   const fetchAchievements = async () => {
     try {
       setLoading(true);
-      
-      const [kuisRes, kategoriRes] = await Promise.all([
+
+      // OPTIMIZED: Get all data using optimized endpoints
+      const [kuisRes, kategoriRes, hasilRes] = await Promise.all([
         api.getKuis(),
-        api.getKategori()
+        api.getKategori(),
+        api.getMyHasilKuis()
       ]);
 
       if (kuisRes.success && kategoriRes.success) {
-        await calculateUserStats(kuisRes.data, kategoriRes.data);
+        await calculateUserStats(kuisRes.data, kategoriRes.data, hasilRes.success ? hasilRes.data : []);
       }
     } catch (error) {
       console.error('Error fetching achievements:', error);
@@ -64,8 +65,7 @@ const AchievementsPage = () => {
     }
   };
 
-  const calculateUserStats = async (allKuis, allKategori) => {
-    const token = localStorage.getItem('token');
+  const calculateUserStats = async (allKuis, allKategori, hasilKuisList) => {
     const stats = {
       totalScore: 0,
       completedQuizzes: 0,
@@ -80,54 +80,47 @@ const AchievementsPage = () => {
       quizDates: []
     };
 
-    // Process quizzes sequentially to avoid overwhelming database
-    for (let i = 0; i < allKuis.length; i++) {
-      const kuis = allKuis[i];
-
+    // OPTIMIZED: Process results from single API call
+    for (const hasil of hasilKuisList) {
       try {
-        // Get quiz questions
-        const soalRes = await api.getSoalByKuisID(kuis.ID);
-        const questionCount = soalRes.success ? soalRes.data.length : 0;
-
-        // Small delay to avoid overwhelming database
-        if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, 50));
+        // Get question count for this quiz
+        let questionCount = 1; // Default fallback
+        try {
+          const soalRes = await api.getSoalByKuisID(hasil.kuis_id);
+          questionCount = soalRes.success ? soalRes.data.length : 1;
+        } catch (soalError) {
+          console.warn(`Failed to get question count for quiz ${hasil.kuis_id}:`, soalError.message);
         }
 
-        // Get quiz result
-        const response = await fetch(`${BASE_URL}/hasil-kuis/${userId}/${kuis.ID}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
+        const rawScore = hasil.score || 0;
+        const correctAnswers = hasil.correct_answer || 0;
+        const quizDate = hasil.created_at || hasil.CreatedAt || new Date().toISOString();
 
-        if (response.ok) {
-          const data = await response.json();
-          const result = data.data;
+        // Get consistent score info
+        const scoreInfo = getConsistentScoreInfo(rawScore, correctAnswers, questionCount);
 
-          const rawScore = result.score || result.Score || 0;
-          const correctAnswers = result.correct_answer || result.Correct_Answer || 0;
-          const quizDate = result.created_at || result.CreatedAt || new Date().toISOString();
+        stats.totalScore += scoreInfo.score;
+        stats.completedQuizzes++;
+        stats.correctAnswers += correctAnswers;
+        stats.totalQuestions += questionCount;
 
-          // Get consistent score info
-          const scoreInfo = getConsistentScoreInfo(rawScore, correctAnswers, questionCount);
-
-          stats.totalScore += scoreInfo.score;
-          stats.completedQuizzes++;
-          stats.correctAnswers += correctAnswers;
-          stats.totalQuestions += questionCount;
+        // Get category from quiz data
+        const kuis = allKuis.find(k => k.ID === hasil.kuis_id);
+        if (kuis) {
           stats.categoriesCompleted.add(kuis.kategori_id);
-          stats.quizDates.push(new Date(quizDate));
-
-          if (scoreInfo.score === 100) {
-            stats.perfectScores++;
-          }
         }
+
+        stats.quizDates.push(new Date(quizDate));
+
+        if (scoreInfo.score === 100) {
+          stats.perfectScores++;
+        }
+
+        // Small delay to prevent overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 50));
       } catch (error) {
-        console.error(`Error processing quiz ${kuis.ID}:`, error);
-        // Continue with next quiz
+        console.error(`Error processing quiz result ${hasil.kuis_id}:`, error);
+        // Continue with next result
       }
     }
 

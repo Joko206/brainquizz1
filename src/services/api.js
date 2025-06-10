@@ -739,4 +739,19 @@ export const api = {
       throw error;
     }
   },
+
+  // OPTIMIZED: Get all quiz results for current user in single API call
+  getMyHasilKuis: async () => {
+    try {
+      const response = await fetch(`${BASE_URL}/hasil-kuis/my-results`, {
+        method: "GET",
+        headers: getAuthHeader(),
+        credentials: 'include',
+      });
+      return handleResponse(response);
+    } catch (error) {
+      console.error("Error fetching my hasil kuis:", error);
+      throw error;
+    }
+  },
 };

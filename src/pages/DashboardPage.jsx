@@ -23,15 +23,7 @@ const DashboardPage = () => {
   const userName = localStorage.getItem('userName') || 'User';
   const role = localStorage.getItem('userRole') || localStorage.getItem('role') || 'student';
 
-  // Debug role detection (development only)
-  if (import.meta.env.DEV) {
-    console.log('Dashboard Role Debug:', {
-      userRole: localStorage.getItem('userRole'),
-      role: localStorage.getItem('role'),
-      finalRole: role,
-      userName: userName
-    });
-  }
+
 
   // Use cached API calls for better performance
   const { data: kategoriData, loading: kategoriLoading } = useApiCache(
@@ -164,84 +156,48 @@ const DashboardPage = () => {
         return;
       }
 
-      // Fetch user's quiz results from real API
+      // OPTIMIZED: Use single API call to get all quiz results
       try {
-        const BASE_URL = import.meta.env.VITE_API_URL ||
-          (import.meta.env.DEV ? "/api" : "https://brainquiz0.up.railway.app");
+        const hasilResponse = await api.getMyHasilKuis();
 
-        const kuisRes = await api.getKuis();
-        if (!kuisRes.success) {
-          throw new Error('Failed to fetch kuis');
+        if (!hasilResponse.success) {
+          // No results yet - set default values
+          setUserStats({
+            completedQuizzes: 0,
+            totalScore: 0,
+            averageScore: 0,
+            accuracy: 0,
+            currentStreak: 0,
+            achievements: 0
+          });
+          return;
         }
 
-        let completedQuizzes = 0;
+        const hasilKuisList = hasilResponse.data || [];
+        let completedQuizzes = hasilKuisList.length;
         let totalScore = 0;
         let totalCorrectAnswers = 0;
         let totalQuestions = 0;
         const recentResults = [];
 
-        // Process quizzes in smaller batches to avoid server overload
-        const batchSize = 3;
-        for (let i = 0; i < kuisRes.data.length; i += batchSize) {
-          const batch = kuisRes.data.slice(i, i + batchSize);
+        // Process results from optimized endpoint
+        for (const hasil of hasilKuisList) {
+          const scoreInfo = getConsistentScoreInfo(
+            hasil.score,
+            hasil.correct_answer || 0,
+            1 // We'll get actual question count separately if needed
+          );
 
-          const batchPromises = batch.map(async (kuis) => {
-            try {
-              // Add small delay to prevent overwhelming the server
-              await new Promise(resolve => setTimeout(resolve, Math.random() * 300));
+          totalScore += scoreInfo.score;
+          totalCorrectAnswers += scoreInfo.correctAnswers;
+          totalQuestions += 1; // Default for now
 
-              const response = await fetch(`${BASE_URL}/hasil-kuis/${currentUserId}/${kuis.ID}`, {
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-                credentials: 'include',
-              });
-
-              if (response.ok) {
-                const data = await response.json();
-                const result = data.data;
-
-                const rawScore = result.score || result.Score || 0;
-                const correctAnswers = result.correct_answer || result.Correct_Answer || 0;
-
-                // Get question count
-                const soalRes = await api.getSoalByKuisID(kuis.ID);
-                const questionCount = soalRes.success ? soalRes.data.length : 0;
-
-                // Normalize score to handle legacy data
-                const scoreInfo = getConsistentScoreInfo(rawScore, correctAnswers, questionCount);
-
-                completedQuizzes++;
-                totalScore += scoreInfo.score; // Use normalized score
-                totalCorrectAnswers += correctAnswers;
-                totalQuestions += questionCount;
-
-                recentResults.push({
-                  kuisTitle: kuis.title,
-                  score: scoreInfo.score,
-                  grade: scoreInfo.grade,
-                  date: result.updated_at || result.UpdatedAt || new Date().toISOString()
-                });
-              } else if (response.status === 404) {
-                // Quiz not completed by user - skip silently without logging
-                return null;
-              } else {
-                console.warn(`HTTP ${response.status} for quiz ${kuis.ID}:`, response.statusText);
-                return null;
-              }
-            } catch (error) {
-              console.warn(`Failed to get result for quiz ${kuis.ID}:`, error.message);
-              return null;
-            }
+          recentResults.push({
+            kuisTitle: hasil.Kuis?.title || 'Unknown Quiz',
+            score: scoreInfo.score,
+            grade: scoreInfo.grade,
+            date: hasil.updated_at || hasil.UpdatedAt || new Date().toISOString()
           });
-
-          const batchResults = await Promise.all(batchPromises);
-
-          // Add delay between batches
-          if (i + batchSize < kuisRes.data.length) {
-            await new Promise(resolve => setTimeout(resolve, 800));
-          }
         }
 
         // Calculate stats
@@ -306,7 +262,6 @@ const DashboardPage = () => {
 
   // Handle navigation for quick actions
   const handleNavigate = (path) => {
-    console.log('🔗 Dashboard navigating to:', path);
     navigate(path);
   };
 
